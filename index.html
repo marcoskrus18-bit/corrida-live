@@ -1,0 +1,161 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Corrida da Live</title>
+<link href="https://fonts.googleapis.com/css2?family=Bungee&family=Nunito:wght@700;900&display=swap" rel="stylesheet">
+<style>
+:root{--bg:#1b1f3b;--track:#2d3358;--lane:#3a4170;--line:#f7f3e3;--hot:#ff5d3a;--gold:#ffc83d;--text:#f7f3e3;color-scheme:dark;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#1b1f3b}}
+*{box-sizing:border-box}
+html,body{height:100%;margin:0}
+body{background:var(--bg);color:var(--text);font-family:'Nunito',system-ui,sans-serif;font-weight:700;display:flex;flex-direction:column;overflow:hidden}
+header{padding:10px 14px;display:flex;justify-content:space-between;align-items:center}
+h1{font-family:'Bungee',Impact,sans-serif;font-size:22px;margin:0;color:var(--gold);font-weight:400}
+#status{font-size:15px}
+#hint{padding:0 14px 8px;font-size:14px;opacity:.9}
+#hint b{color:var(--gold)}
+#track{flex:1;position:relative;margin:0 8px;background:var(--track);border-radius:14px;overflow:hidden;min-height:0}
+#finish{position:absolute;right:28px;top:0;bottom:0;width:14px;background:repeating-conic-gradient(var(--line) 0 25%,#111 0 50%) 0 0/14px 14px;z-index:1}
+.lane{position:absolute;left:0;right:0;border-bottom:2px dashed var(--lane)}
+.car{position:absolute;left:0;height:70%;top:15%;display:flex;align-items:center;transition:none;will-change:transform}
+.car .body{width:46px;height:70%;min-height:22px;border-radius:12px 18px 18px 12px;position:relative}
+.car .body:after{content:"";position:absolute;right:8px;top:18%;bottom:18%;width:10px;background:rgba(255,255,255,.55);border-radius:4px}
+.car .name{margin-left:6px;font-size:13px;white-space:nowrap;text-shadow:0 1px 2px #000;max-width:110px;overflow:hidden;text-overflow:ellipsis}
+.car.boost .body{box-shadow:-14px 0 0 -2px var(--hot),-26px 0 0 -4px var(--gold)}
+#rank{padding:8px 14px;font-size:15px;min-height:56px}
+#winner{position:absolute;inset:0;background:rgba(10,12,30,.85);display:none;flex-direction:column;align-items:center;justify-content:center;text-align:center;z-index:5;padding:20px}
+#winner.on{display:flex}
+#winner .big{font-family:'Bungee',Impact,sans-serif;font-size:34px;color:var(--gold);margin:6px 0}
+#sim{background:#12152b;padding:10px 12px;display:grid;grid-template-columns:1fr 1fr;gap:8px}
+#sim input{grid-column:1/3;padding:10px;border-radius:10px;border:0;font:inherit;background:#252a4d;color:var(--text)}
+#sim button{padding:12px 6px;border:0;border-radius:10px;font:inherit;font-weight:900;background:var(--gold);color:#1b1f3b}
+#sim button.alt{background:var(--hot);color:#fff}
+#sim button.ghost{background:#252a4d;color:var(--text)}
+#sim.off{display:none}
+#toggle{position:fixed;right:8px;top:calc(env(safe-area-inset-top,0px) + 6px);z-index:9;background:#252a4d;color:var(--text);border:0;border-radius:8px;padding:6px 10px;font:inherit;font-size:12px}
+@media (prefers-reduced-motion:reduce){.car{transition:none}}
+</style>
+</head>
+<body>
+<button id="toggle" type="button">Ocultar painel</button>
+<header><h1>Corrida da Live</h1><span id="status">Largada em 20s</span></header>
+<div id="hint">Digite <b>!entrar</b> para correr e <b>!turbo</b> para acelerar. Presentes dão turbo gigante.</div>
+<div id="track"><div id="finish"></div><div id="winner"><div>Vencedor</div><div class="big" id="wname"></div><div id="wnext"></div></div></div>
+<div id="rank">Aguardando pilotos…</div>
+<div id="sim">
+<input id="nick" value="Maria" aria-label="Nome do espectador de teste">
+<button class="ghost" id="bJoin" type="button">!entrar</button>
+<button id="bTurbo" type="button">!turbo</button>
+<button class="alt" id="bGift" type="button">Presente</button>
+<button class="ghost" id="bBots" type="button">+5 pilotos</button>
+</div>
+<script>
+(function(){
+var MAX=8,LOBBY=20,COLORS=['#ff5d3a','#ffc83d','#4cd9a3','#59b8ff','#c77dff','#ff8fb1','#a3e635','#ff9f1c'];
+var NAMES=['Ana','Beto','Caio','Duda','Edu','Fabi','Gui','Hugo','Iara','Jo','Kaká','Lu','Mel','Nando','Bia','Theo'];
+var state='lobby',players=[],lobbyT=LOBBY,last=performance.now(),track=document.getElementById('track'),
+status=document.getElementById('status'),rank=document.getElementById('rank'),winner=document.getElementById('winner'),trackW=0;
+
+function laneH(){return track.clientHeight/MAX}
+function layout(){trackW=track.clientWidth-28-46-4;players.forEach(function(p,i){p.lane.style.top=i*laneH()+'px';p.lane.style.height=laneH()+'px'})}
+window.addEventListener('resize',layout);
+
+function join(user){
+  if(state!=='lobby'||players.length>=MAX)return false;
+  if(players.some(function(p){return p.user===user}))return false;
+  var i=players.length,lane=document.createElement('div');lane.className='lane';
+  var car=document.createElement('div');car.className='car';
+  var color=COLORS[i%COLORS.length];
+  car.innerHTML='<div class="body" style="background:'+color+'"></div><span class="name"></span>';
+  car.querySelector('.name').textContent=user;
+  lane.appendChild(car);track.appendChild(lane);
+  players.push({user:user,lane:lane,car:car,x:0,speed:0,base:.055+Math.random()*.02,boost:0,cool:0});
+  layout();updateRank();return true;
+}
+function turbo(user,power){
+  var p=players.find(function(q){return q.user===user});
+  if(!p||state!=='race')return;
+  if(power>1){p.boost=Math.max(p.boost,2.5);return}
+  if(p.cool<=0){p.boost=Math.max(p.boost,1.2);p.cool=3}
+}
+function updateRank(){
+  if(!players.length){rank.textContent='Aguardando pilotos…';return}
+  var s=players.slice().sort(function(a,b){return b.x-a.x}).slice(0,3);
+  rank.innerHTML=s.map(function(p,i){return (i+1)+'º '+esc(p.user)}).join(' &nbsp; ');
+}
+function esc(t){return t.replace(/[&<>]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;'}[c]})}
+
+function startRace(){
+  if(players.length<2){lobbyT=LOBBY;return}
+  state='race';status.textContent='Valendo!';
+}
+function finish(p){
+  state='end';document.getElementById('wname').textContent=p.user;
+  var n=8,w=document.getElementById('wnext');w.textContent='Nova corrida em '+n+'s';
+  winner.classList.add('on');
+  var t=setInterval(function(){n--;w.textContent='Nova corrida em '+n+'s';if(n<=0){clearInterval(t);reset()}},1000);
+}
+function reset(){
+  players.forEach(function(p){p.lane.remove()});players=[];winner.classList.remove('on');
+  state='lobby';lobbyT=LOBBY;updateRank();
+}
+function frame(now){
+  var dt=Math.min(.05,(now-last)/1000);last=now;
+  if(state==='lobby'){
+    lobbyT-=dt;status.textContent=players.length<2?'Precisa de 2 pilotos':'Largada em '+Math.ceil(lobbyT)+'s';
+    if(lobbyT<=0)startRace();
+  }else if(state==='race'){
+    players.forEach(function(p){
+      p.cool-=dt;p.boost-=dt;
+      var target=p.base*(p.boost>0?3.2:1);
+      p.speed+=(target-p.speed)*Math.min(1,dt*4);
+      p.speed+=(Math.random()-.5)*.004;
+      p.x+=Math.max(.01,p.speed)*dt*1;
+      p.car.classList.toggle('boost',p.boost>0);
+      if(p.x>=1&&state==='race'){p.x=1;finish(p)}
+    });
+    updateRank();
+  }
+  players.forEach(function(p){p.car.style.transform='translateX('+(p.x*trackW)+'px)'});
+  requestAnimationFrame(frame);
+}
+requestAnimationFrame(frame);
+
+/* Ganchos para o chat real do TikTok (ponte externa chama estas funções) */
+window.onChat=function(user,text){
+  var t=String(text).trim().toLowerCase();
+  if(t==='!entrar')join(user);else if(t==='!turbo')turbo(user,1);
+};
+window.onGift=function(user){join(user);turbo(user,2)};
+
+/* Painel de teste */
+var nick=document.getElementById('nick');
+document.getElementById('bJoin').onclick=function(){window.onChat(nick.value||'Teste','!entrar')};
+document.getElementById('bTurbo').onclick=function(){window.onChat(nick.value||'Teste','!turbo')};
+document.getElementById('bGift').onclick=function(){window.onGift(nick.value||'Teste')};
+document.getElementById('bBots').onclick=function(){
+  var pool=NAMES.slice().sort(function(){return Math.random()-.5}),k=0;
+  pool.forEach(function(n){if(k<5&&join(n))k++});
+};
+setInterval(function(){ /* bots dão turbo sozinhos para o teste */
+  if(state==='race')players.forEach(function(p){if(Math.random()<.15)turbo(p.user,1)});
+},900);
+var sim=document.getElementById('sim'),tg=document.getElementById('toggle');
+tg.onclick=function(){sim.classList.toggle('off');tg.textContent=sim.classList.contains('off')?'Mostrar painel':'Ocultar painel';layout()};
+if(location.search.indexOf('painel=0')>-1){sim.classList.add('off');tg.style.display='none'}
+layout();
+/* Chat real: recebe eventos do servidor */
+try{
+  var es=new EventSource('/events');
+  es.onmessage=function(e){
+    var m=JSON.parse(e.data);
+    if(m.type==='chat')window.onChat(m.user,m.text);
+    else if(m.type==='gift')window.onGift(m.user);
+  };
+}catch(err){console.error(err)}
+})();
+</script>
+</body>
+</html>
